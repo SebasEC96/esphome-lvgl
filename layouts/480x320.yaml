@@ -64,8 +64,16 @@ lvgl:
   theme: !include themes/main.yaml
   top_layer:
     widgets:
-      - <<: !include { file: widgets/header/widget.yaml, vars: { <<: *nav_widget_vars } }
-      - <<: !include { file: widgets/footer/widget.yaml, vars: { <<: *nav_widget_vars } }
+      - <<:
+          !include {
+            file: widgets/header/widget.yaml,
+            vars: { <<: *nav_widget_vars },
+          }
+      - <<:
+          !include {
+            file: widgets/footer/widget.yaml,
+            vars: { <<: *nav_widget_vars },
+          }
       - <<: !include { file: widgets/boot_screen/widget.yaml }
   pages:
     - id: splash
@@ -124,17 +132,9 @@ lvgl:
                       uid: sala_lights_toggle
                       text: Luz Sala
                       <<: *button_widget_vars
-                  on_short_click:
-                    - homeassistant.action:
-                        action: light.toggle
-                        data:
-                          entity_id:
-                            - light.light_2_1
-                            - light.light_2_2
-                            - light.light_3_1
-                            - light.light_3_2
-                            - light.wall_light
-
+                  on_press:
+                    then:
+                      - light.toggle: light.light_2_1
               - button: # tv sala
                   <<: !include
                     file: widgets/buttons/icon_text_buttons/stateful.yaml
@@ -191,19 +191,21 @@ packages:
   # boot screen
   boot_screen_sensors: !include { file: widgets/boot_screen/sensors.yaml }
 
-
-  sala_tv_widget_sensors: !include { file: widgets/buttons/icon_buttons/stateful_sensors.yaml, vars: {
-    uid: sala_tv,
-    entity_id: media_player.sala_tv
-  }}
+  sala_tv_widget_sensors:
+    !include {
+      file: widgets/buttons/icon_buttons/stateful_sensors.yaml,
+      vars: { uid: sala_tv, entity_id: media_player.sala_tv },
+    }
 
   # habitacion
-  habitacion_light_widget_sensors: !include { file: widgets/buttons/icon_text_buttons/light_buttons/sensors.yaml, vars: {
-    uid: habitacion_light,
-    entity_id: light.habitacion_light
-  }}
+  habitacion_light_widget_sensors:
+    !include {
+      file: widgets/buttons/icon_text_buttons/light_buttons/sensors.yaml,
+      vars: { uid: habitacion_light, entity_id: light.habitacion_light },
+    }
 
-  habitacion_fan_widget_sensors: !include { file: widgets/buttons/icon_buttons/stateful_sensors.yaml, vars: {
-    uid: habitacion_fan,
-    entity_id: fan.habitacion_fan
-  }}
+  habitacion_fan_widget_sensors:
+    !include {
+      file: widgets/buttons/icon_buttons/stateful_sensors.yaml,
+      vars: { uid: habitacion_fan, entity_id: fan.habitacion_fan },
+    }

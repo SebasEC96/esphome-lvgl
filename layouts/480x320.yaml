@@ -100,7 +100,7 @@ lvgl:
                     file: widgets/buttons/text_buttons/stateless.yaml
                     vars:
                       uid: go_to_habitacion
-                      text: Habitación
+                      text: Habitacion
                       <<: *button_widget_vars
                   on_short_click:
                     - lvgl.page.show: habitacion
@@ -145,7 +145,7 @@ lvgl:
       on_load:
         - lvgl.label.update:
             id: page_title
-            text: Habitación
+            text: Habitacion
       widgets:
         - obj:
             <<: *container_styles

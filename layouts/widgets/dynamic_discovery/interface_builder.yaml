@@ -1,0 +1,319 @@
+# Dynamic LVGL Interface Builder
+# Generates LVGL widgets dynamically based on discovered zones and devices
+
+# Custom component para construir la interfaz dinámicamente
+custom_component:
+  - lambda: |-
+      class InterfaceBuilder : public Component {
+      public:
+        void setup() override {
+          this->lvgl_comp_ = id(lvgl_component);
+        }
+
+        void rebuild_zones() {
+          ESP_LOGI("builder", "Rebuilding zones interface");
+
+          // Obtener zonas del parser
+          auto zones = id(config_parser).get_zones();
+
+          // Limpiar páginas existentes (excepto boot screen)
+          clear_dynamic_pages();
+
+          // Crear página para cada zona
+          for (const auto& zone : zones) {
+            if (zone.enabled) {
+              create_zone_page(zone);
+            }
+          }
+
+          // Actualizar navegación
+          update_navigation();
+        }
+
+        void rebuild_devices() {
+          ESP_LOGI("builder", "Rebuilding devices interface");
+
+          auto devices = id(config_parser).get_devices();
+          auto zones = id(config_parser).get_zones();
+
+          // Para cada zona, crear widgets de sus dispositivos
+          for (const auto& zone : zones) {
+            if (!zone.enabled) continue;
+
+            auto zone_page = find_page(zone.name);
+            if (!zone_page) continue;
+
+            // Limpiar widgets existentes
+            clear_page_widgets(zone_page);
+
+            // Crear container principal
+            auto container = create_zone_container(zone_page);
+
+            // Agrupar dispositivos por tipo
+            auto devices_by_type = group_devices_by_type(devices, zone.name);
+
+            // Crear widgets para cada tipo de dispositivo
+            create_light_widgets(container, devices_by_type["light"]);
+            create_media_widgets(container, devices_by_type["media_player"]);
+            create_climate_widgets(container, devices_by_type["climate"]);
+            create_switch_widgets(container, devices_by_type["switch"]);
+          }
+        }
+
+      private:
+        lvgl::LvglComponent* lvgl_comp_;
+        std::vector<lvgl::LvglPage*> dynamic_pages_;
+
+        void clear_dynamic_pages() {
+          for (auto page : dynamic_pages_) {
+            // Remover página del componente LVGL
+            page->set_parent(nullptr);
+            delete page;
+          }
+          dynamic_pages_.clear();
+        }
+
+        void create_zone_page(const Zone& zone) {
+          // Crear nueva página LVGL
+          auto page = new lvgl::LvglPage();
+          page->set_id(("page_" + zone.name).c_str());
+          page->set_parent(this->lvgl_comp_);
+
+          // Configurar estilo de página
+          page->set_style_bg_color(lv_color_hex(0x42495A), 0);
+          page->set_style_pad_top(40, 0);
+          page->set_style_pad_bottom(40, 0);
+
+          // Agregar callback para actualizar título
+          page->add_on_load_callback([zone](lvgl::LvglPage* p) {
+            auto title_label = id(page_title);
+            if (title_label) {
+              title_label->set_text(zone.friendly_name.c_str());
+            }
+          });
+
+          dynamic_pages_.push_back(page);
+
+          ESP_LOGI("builder", "Created page for zone: %s", zone.name.c_str());
+        }
+
+        lvgl::LvglObj* create_zone_container(lvgl::LvglPage* page) {
+          auto container = new lvgl::LvglObj(page);
+
+          // Configurar layout flex
+          container->set_style_layout(LV_LAYOUT_FLEX, 0);
+          container->set_style_flex_flow(LV_FLEX_FLOW_ROW_WRAP, 0);
+          container->set_style_flex_align_main(LV_FLEX_ALIGN_SPACE_EVENLY, 0);
+          container->set_style_flex_align_cross(LV_FLEX_ALIGN_CENTER, 0);
+
+          // Configurar padding y estilo
+          container->set_style_pad_all(4, 0);
+          container->set_style_pad_column(4, 0);
+          container->set_style_pad_row(5, 0);
+          container->set_style_bg_opa(LV_OPA_TRANSP, 0);
+          container->set_style_border_width(0, 0);
+
+          container->set_size(LV_SIZE_CONTENT, LV_SIZE_CONTENT);
+          container->set_align(LV_ALIGN_TOP_MID);
+
+          return container;
+        }
+
+        void create_light_widgets(lvgl::LvglObj* container, const std::vector<Device>& lights) {
+          for (const auto& light : lights) {
+            auto button = create_device_button(container, light);
+
+            // Configurar como botón de luz
+            button->set_style_bg_color(lv_color_hex(0x5A6173), 0);
+            button->set_style_bg_color(lv_color_hex(0xFFD700), LV_STATE_CHECKED);
+
+            // Agregar icono de luz
+            auto icon_label = new lvgl::LvglLabel(button);
+            icon_label->set_text("💡");
+            icon_label->set_align(LV_ALIGN_TOP_MID);
+            icon_label->set_y(10);
+
+            // Agregar texto del dispositivo
+            auto text_label = new lvgl::LvglLabel(button);
+            text_label->set_text(light.friendly_name.c_str());
+            text_label->set_align(LV_ALIGN_BOTTOM_MID);
+            text_label->set_y(-10);
+            text_label->set_style_text_font(&lv_font_montserrat_12, 0);
+
+            // Configurar callback para toggle
+            button->add_event_cb([light](lv_event_t* e) {
+              auto call = id(homeassistant_api).call_service("light", "toggle");
+              call.add_variable("entity_id", light.entity_id);
+              call.perform();
+            }, LV_EVENT_CLICKED);
+
+            // Suscribirse a cambios de estado
+            setup_light_state_tracking(button, light.entity_id);
+          }
+        }
+
+        void create_media_widgets(lvgl::LvglObj* container, const std::vector<Device>& media_players) {
+          for (const auto& player : media_players) {
+            // Crear container para controles de media
+            auto media_container = new lvgl::LvglObj(container);
+            media_container->set_size(240, 80);
+            media_container->set_style_bg_color(lv_color_hex(0x5A6173), 0);
+            media_container->set_style_radius(10, 0);
+
+            // Botón play/pause
+            auto play_btn = create_media_button(media_container, "⏯", 20, 20);
+            play_btn->add_event_cb([player](lv_event_t* e) {
+              auto call = id(homeassistant_api).call_service("media_player", "media_play_pause");
+              call.add_variable("entity_id", player.entity_id);
+              call.perform();
+            }, LV_EVENT_CLICKED);
+
+            // Botón stop
+            auto stop_btn = create_media_button(media_container, "⏹", 70, 20);
+            stop_btn->add_event_cb([player](lv_event_t* e) {
+              auto call = id(homeassistant_api).call_service("media_player", "media_stop");
+              call.add_variable("entity_id", player.entity_id);
+              call.perform();
+            }, LV_EVENT_CLICKED);
+
+            // Controles de volumen
+            auto vol_down = create_media_button(media_container, "🔉", 120, 20);
+            auto vol_up = create_media_button(media_container, "🔊", 170, 20);
+
+            vol_down->add_event_cb([player](lv_event_t* e) {
+              auto call = id(homeassistant_api).call_service("media_player", "volume_down");
+              call.add_variable("entity_id", player.entity_id);
+              call.perform();
+            }, LV_EVENT_CLICKED);
+
+            vol_up->add_event_cb([player](lv_event_t* e) {
+              auto call = id(homeassistant_api).call_service("media_player", "volume_up");
+              call.add_variable("entity_id", player.entity_id);
+              call.perform();
+            }, LV_EVENT_CLICKED);
+          }
+        }
+
+        void create_climate_widgets(lvgl::LvglObj* container, const std::vector<Device>& climate_devices) {
+          for (const auto& climate : climate_devices) {
+            auto climate_container = new lvgl::LvglObj(container);
+            climate_container->set_size(240, 100);
+            climate_container->set_style_bg_color(lv_color_hex(0x5A6173), 0);
+            climate_container->set_style_radius(10, 0);
+
+            // Label para temperatura actual
+            auto temp_label = new lvgl::LvglLabel(climate_container);
+            temp_label->set_text("--°C");
+            temp_label->set_align(LV_ALIGN_TOP_MID);
+            temp_label->set_y(10);
+
+            // Botones +/-
+            auto temp_down = create_media_button(climate_container, "-", 50, 60);
+            auto temp_up = create_media_button(climate_container, "+", 150, 60);
+
+            // Suscribirse a cambios de temperatura
+            setup_climate_state_tracking(temp_label, climate.entity_id);
+          }
+        }
+
+        void create_switch_widgets(lvgl::LvglObj* container, const std::vector<Device>& switches) {
+          // Similar a lights pero con iconos diferentes
+          for (const auto& switch_device : switches) {
+            auto button = create_device_button(container, switch_device);
+
+            auto icon_label = new lvgl::LvglLabel(button);
+            icon_label->set_text("🔌");
+            icon_label->set_align(LV_ALIGN_CENTER);
+
+            button->add_event_cb([switch_device](lv_event_t* e) {
+              auto call = id(homeassistant_api).call_service("switch", "toggle");
+              call.add_variable("entity_id", switch_device.entity_id);
+              call.perform();
+            }, LV_EVENT_CLICKED);
+          }
+        }
+
+        lvgl::LvglButton* create_device_button(lvgl::LvglObj* parent, const Device& device) {
+          auto button = new lvgl::LvglButton(parent);
+          button->set_size(114, 75);  // Tamaño estándar del layout
+          button->set_style_bg_color(lv_color_hex(0x5A6173), 0);
+          button->set_style_border_width(0, 0);
+          button->set_style_radius(20, 0);
+
+          return button;
+        }
+
+        lvgl::LvglButton* create_media_button(lvgl::LvglObj* parent, const char* text, int x, int y) {
+          auto button = new lvgl::LvglButton(parent);
+          button->set_size(40, 40);
+          button->set_pos(x, y);
+
+          auto label = new lvgl::LvglLabel(button);
+          label->set_text(text);
+          label->set_align(LV_ALIGN_CENTER);
+
+          return button;
+        }
+
+        void setup_light_state_tracking(lvgl::LvglButton* button, const std::string& entity_id) {
+          // Crear sensor para trackear estado
+          // Esto requeriría integración con el sistema de sensores de ESPHome
+        }
+
+        void setup_climate_state_tracking(lvgl::LvglLabel* label, const std::string& entity_id) {
+          // Similar para climate
+        }
+
+        std::map<std::string, std::vector<Device>> group_devices_by_type(
+            const std::vector<Device>& devices, const std::string& zone_name) {
+          std::map<std::string, std::vector<Device>> grouped;
+
+          for (const auto& device : devices) {
+            if (device.zone == zone_name) {
+              grouped[device.type].push_back(device);
+            }
+          }
+
+          return grouped;
+        }
+
+        lvgl::LvglPage* find_page(const std::string& zone_name) {
+          std::string page_id = "page_" + zone_name;
+          for (auto page : dynamic_pages_) {
+            if (page->get_id() == page_id) {
+              return page;
+            }
+          }
+          return nullptr;
+        }
+
+        void clear_page_widgets(lvgl::LvglPage* page) {
+          // Limpiar widgets hijos
+          // Implementación específica depende de la API de LVGL
+        }
+
+        void update_navigation() {
+          // Actualizar botones de navegación para incluir nuevas páginas
+          ESP_LOGI("builder", "Updated navigation with %d dynamic pages", dynamic_pages_.size());
+        }
+      };
+
+      return new InterfaceBuilder();
+    id: interface_builder
+
+# Scripts para trigger manual
+script:
+  - id: force_interface_rebuild
+    then:
+      - lambda: |-
+          id(interface_builder).rebuild_zones();
+          id(interface_builder).rebuild_devices();
+
+# Automation para rebuild automático cuando cambian los datos
+automation:
+  - trigger:
+      - platform: state
+        entity_id: binary_sensor.zones_updated
+        to: 'on'
+    action:
+      - script.execute: force_interface_rebuild

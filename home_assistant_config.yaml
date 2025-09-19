@@ -1,0 +1,179 @@
+# Home Assistant Configuration for Dynamic Dashboard
+# Add this to your configuration.yaml or as a package
+
+# Template sensors para generar configuración dinámica
+template:
+  - sensor:
+      - name: "Dashboard Zones Config"
+        unique_id: dashboard_zones_config
+        state: "{{ now() }}"
+        attributes:
+          zones: >-
+            {%- set ns = namespace(zones={}) -%}
+            {%- for entity in states -%}
+              {%- if entity.entity_id.split('.')[0] in ['light', 'switch', 'media_player', 'climate'] -%}
+                {%- set parts = entity.entity_id.split('.')[1].split('_') -%}
+                {%- set zone = parts[0] if parts|length > 1 else 'general' -%}
+                {%- if zone not in ['all', 'group', 'scene'] -%}
+                  {%- set zone_name = zone.replace('_', ' ').title() -%}
+                  {%- set ns.zones = dict(ns.zones, **{zone: {
+                    'friendly_name': zone_name,
+                    'icon': 'mdi:home-outline',
+                    'enabled': true,
+                    'auto_discovered': true
+                  }}) -%}
+                {%- endif -%}
+              {%- endif -%}
+            {%- endfor -%}
+            {{ ns.zones | tojson }}
+
+      - name: "Dashboard Devices Config"
+        unique_id: dashboard_devices_config
+        state: "{{ now() }}"
+        attributes:
+          devices: >-
+            {%- set ns = namespace(config={}) -%}
+            {%- for entity in states -%}
+              {%- if entity.entity_id.split('.')[0] in ['light', 'switch', 'media_player', 'climate', 'cover', 'fan'] -%}
+                {%- set domain = entity.entity_id.split('.')[0] -%}
+                {%- set parts = entity.entity_id.split('.')[1].split('_') -%}
+                {%- set zone = parts[0] if parts|length > 1 else 'general' -%}
+                {%- if zone not in ['all', 'group', 'scene'] -%}
+                  {%- if zone not in ns.config -%}
+                    {%- set ns.config = dict(ns.config, **{zone: {}}) -%}
+                  {%- endif -%}
+                  {%- if domain not in ns.config[zone] -%}
+                    {%- set ns.config = dict(ns.config, **{zone: dict(ns.config[zone], **{domain: []})}) -%}
+                  {%- endif -%}
+                  {%- set device_info = {
+                    'entity_id': entity.entity_id,
+                    'friendly_name': entity.name or entity.entity_id.split('.')[1].replace('_', ' ').title(),
+                    'icon': entity.attributes.icon or 'mdi:help-circle',
+                    'device_class': entity.attributes.device_class or 'generic',
+                    'area': entity.attributes.area_id or zone
+                  } -%}
+                  {%- set ns.config = dict(ns.config, **{zone: dict(ns.config[zone], **{domain: ns.config[zone][domain] + [device_info]})}) -%}
+                {%- endif -%}
+              {%- endif -%}
+            {%- endfor -%}
+            {{ ns.config | tojson }}
+
+      - name: "All Entities List"
+        unique_id: all_entities_list
+        state: >-
+          {{ states | selectattr('domain', 'in', ['light', 'switch', 'media_player', 'climate', 'cover', 'fan'])
+             | map(attribute='entity_id') | list | join(',') }}
+
+# Input text para recibir configuración auto-generada desde ESPHome
+input_text:
+  dashboard_auto_config:
+    name: "Dashboard Auto Config"
+    max: 4096
+    initial: "{}"
+
+# Script para enviar configuración a ESPHome
+script:
+  update_esphome_dashboard:
+    alias: "Update ESPHome Dashboard"
+    sequence:
+      - service: esphome.your_device_name_update_zone_config
+        data:
+          zones_json: "{{ state_attr('sensor.dashboard_zones_config', 'zones') | tojson }}"
+          devices_json: "{{ state_attr('sensor.dashboard_devices_config', 'devices') | tojson }}"
+
+# Automation para actualizar cuando cambien las entidades
+automation:
+  - alias: "Dashboard Config Auto Update"
+    trigger:
+      - platform: event
+        event_type: entity_registry_updated
+      - platform: time_pattern
+        minutes: "/30"  # Cada 30 minutos
+    action:
+      - service: homeassistant.update_entity
+        entity_id:
+          - sensor.dashboard_zones_config
+          - sensor.dashboard_devices_config
+      - delay: "00:00:02"
+      - service: script.update_esphome_dashboard
+
+# Sensor para detectar nuevos dispositivos
+binary_sensor:
+  - platform: template
+    sensors:
+      new_devices_detected:
+        friendly_name: "New Devices Detected"
+        value_template: >-
+          {%- set stored_count = states('input_number.device_count') | int -%}
+          {%- set current_count = states | selectattr('domain', 'in', ['light', 'switch', 'media_player', 'climate']) | list | length -%}
+          {{ current_count != stored_count }}
+
+# Input number para trackear cantidad de dispositivos
+input_number:
+  device_count:
+    name: "Device Count"
+    min: 0
+    max: 1000
+    step: 1
+
+# RESTful command para forzar actualización en ESPHome
+rest_command:
+  force_esphome_discovery:
+    url: "http://{{ states('sensor.your_esphome_device_ip') }}/force_zone_discovery"
+    method: POST
+
+# Ejemplo de configuración manual para casos específicos
+input_select:
+  dashboard_theme:
+    name: "Dashboard Theme"
+    options:
+      - "Dark"
+      - "Light"
+      - "Auto"
+    initial: "Dark"
+
+  dashboard_layout:
+    name: "Dashboard Layout"
+    options:
+      - "Grid"
+      - "List"
+      - "Compact"
+    initial: "Grid"
+
+# Sensor para configuración de UI personalizada
+sensor:
+  - platform: template
+    sensors:
+      dashboard_ui_config:
+        friendly_name: "Dashboard UI Config"
+        value_template: >-
+          {{
+            {
+              'theme': states('input_select.dashboard_theme'),
+              'layout': states('input_select.dashboard_layout'),
+              'auto_hide_empty_zones': true,
+              'show_device_icons': true,
+              'enable_animations': true,
+              'button_size': 'medium'
+            } | tojson
+          }}
+
+# Notificaciones para cambios importantes
+notify:
+  - name: dashboard_updates
+    platform: group
+    services:
+      - service: mobile_app_your_phone
+
+# Automation para notificar cambios de configuración
+automation:
+  - alias: "Notify Dashboard Changes"
+    trigger:
+      - platform: state
+        entity_id: binary_sensor.new_devices_detected
+        to: 'on'
+    action:
+      - service: notify.dashboard_updates
+        data:
+          title: "Dashboard Updated"
+          message: "New devices detected and dashboard configuration updated automatically."

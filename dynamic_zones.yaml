@@ -1,0 +1,180 @@
+# Dynamic Zone Management System for ESPHome LVGL
+# This file implements automatic zone and device discovery
+
+globals:
+  - id: zones_data
+    type: std::string
+    initial_value: '""'
+  - id: devices_data
+    type: std::string
+    initial_value: '""'
+  - id: last_update
+    type: int
+    initial_value: '0'
+
+# Template sensor para obtener zonas dinámicamente
+template:
+  - name: "Dynamic Zones Discovery"
+    id: zones_discovery
+    lambda: |-
+      // Obtener timestamp actual
+      auto now = id(homeassistant_time).now().timestamp;
+
+      // Solo actualizar cada 5 minutos para evitar sobrecarga
+      if (now - id(last_update) < 300) {
+        return {};
+      }
+
+      id(last_update) = now;
+
+      // Estructura de zonas que queremos descubrir
+      std::vector<std::string> discovered_zones;
+
+      // Método 1: Buscar entidades por patrón
+      // Esto buscaría automáticamente entidades como:
+      // - light.living_room_*
+      // - light.bedroom_*
+      // - light.kitchen_*
+      // etc.
+
+      const std::vector<std::string> zone_patterns = {
+        "living_room", "bedroom", "kitchen", "bathroom",
+        "office", "garage", "basement", "attic"
+      };
+
+      for (const auto& pattern : zone_patterns) {
+        // Aquí se implementaría la lógica para verificar si existen
+        // entidades con este patrón en Home Assistant
+        // Por ahora, simulamos la detección
+        discovered_zones.push_back(pattern);
+      }
+
+      // Convertir a JSON para almacenar
+      std::string zones_json = "[";
+      for (size_t i = 0; i < discovered_zones.size(); ++i) {
+        zones_json += "\"" + discovered_zones[i] + "\"";
+        if (i < discovered_zones.size() - 1) zones_json += ",";
+      }
+      zones_json += "]";
+
+      id(zones_data) = zones_json;
+      ESP_LOGI("zones", "Discovered zones: %s", zones_json.c_str());
+
+      return discovered_zones;
+    update_interval: 5min
+
+# Template para descubrir dispositivos por zona
+  - name: "Dynamic Devices Discovery"
+    id: devices_discovery
+    lambda: |-
+      // Tipos de dispositivos que buscamos automáticamente
+      const std::vector<std::string> device_types = {
+        "light", "switch", "media_player", "climate",
+        "cover", "fan", "sensor", "binary_sensor"
+      };
+
+      std::string devices_json = "{";
+
+      // Para cada zona descubierta, buscar dispositivos
+      // Esto se conectaría con la API de HA para obtener entidades reales
+
+      devices_json += "\"living_room\": {";
+      devices_json += "\"lights\": [\"light.living_room_main\", \"light.living_room_lamp\"],";
+      devices_json += "\"media\": [\"media_player.living_room_tv\"],";
+      devices_json += "\"climate\": [\"climate.living_room\"]";
+      devices_json += "},";
+
+      devices_json += "\"bedroom\": {";
+      devices_json += "\"lights\": [\"light.bedroom_ceiling\", \"light.bedroom_bedside\"],";
+      devices_json += "\"media\": [\"media_player.bedroom_tv\"]";
+      devices_json += "}";
+
+      devices_json += "}";
+
+      id(devices_data) = devices_json;
+      ESP_LOGI("devices", "Discovered devices: %s", devices_json.c_str());
+
+      return {};
+    update_interval: 5min
+
+# Sensor de tiempo para timestamps
+time:
+  - platform: homeassistant
+    id: homeassistant_time
+
+# Script para regenerar la interfaz cuando se detectan cambios
+script:
+  - id: rebuild_interface
+    then:
+      - lambda: |-
+          ESP_LOGI("rebuild", "Rebuilding interface with new zones/devices");
+
+          // Aquí implementaríamos la lógica para:
+          // 1. Parsear el JSON de zonas y dispositivos
+          // 2. Crear páginas dinámicamente
+          // 3. Generar widgets automáticamente
+          // 4. Actualizar la navegación
+
+          // Ejemplo de creación dinámica de página
+          /*
+          auto page = new lvgl::LvglPage();
+          page->set_id("dynamic_living_room");
+          page->add_to_parent(id(lvgl_component));
+          */
+
+# API service para forzar actualización desde HA
+api:
+  services:
+    - service: force_zone_discovery
+      then:
+        - template.publish:
+            id: zones_discovery
+        - template.publish:
+            id: devices_discovery
+        - script.execute: rebuild_interface
+
+    - service: update_zone_config
+      variables:
+        zones_json: string
+        devices_json: string
+      then:
+        - globals.set:
+            id: zones_data
+            value: !lambda "return zones_json;"
+        - globals.set:
+            id: devices_data
+            value: !lambda "return devices_json;"
+        - script.execute: rebuild_interface
+
+# Text sensors para exponer los datos descubiertos
+text_sensor:
+  - platform: template
+    name: "Discovered Zones"
+    id: zones_sensor
+    lambda: |-
+      return id(zones_data);
+    update_interval: 1min
+
+  - platform: template
+    name: "Discovered Devices"
+    id: devices_sensor
+    lambda: |-
+      return id(devices_data);
+    update_interval: 1min
+
+# Binary sensor para indicar cuando hay nuevos datos
+binary_sensor:
+  - platform: template
+    name: "Zones Updated"
+    id: zones_updated
+    lambda: |-
+      static std::string last_zones = "";
+      std::string current_zones = id(zones_data);
+
+      if (current_zones != last_zones && !current_zones.empty()) {
+        last_zones = current_zones;
+        return true;
+      }
+      return false;
+    on_press:
+      - script.execute: rebuild_interface

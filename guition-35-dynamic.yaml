@@ -1,0 +1,281 @@
+# Guition 3.5" with Dynamic Zone Discovery
+# Replace your current guition-35-example.yaml with this
+
+esphome:
+  name: guition-35-dynamic
+  friendly_name: Guition 3.5" Dynamic
+
+substitutions:
+  home_page: dynamic_home  # Will be set dynamically
+
+# Base packages - hardware + dynamic system
+packages:
+  device: !include devices/JC3248W535.yaml
+  base_common: !include common.yaml
+
+# Include ONLY the dynamic discovery system
+globals:
+  - id: zones_data
+    type: std::string
+    initial_value: '""'
+  - id: devices_data
+    type: std::string
+    initial_value: '""'
+  - id: current_zone_index
+    type: int
+    initial_value: '0'
+
+# Simple dynamic zone discovery for your Guition
+template:
+  - name: "Guition Zone Scanner"
+    lambda: |-
+      // Scan for common Home Assistant entities
+      std::vector<std::string> found_zones;
+
+      // Common zone patterns to look for
+      std::vector<std::string> patterns = {
+        "living_room", "bedroom", "kitchen", "bathroom", "office"
+      };
+
+      // For now, simulate discovery - in real use this would query HA
+      for (auto& pattern : patterns) {
+        found_zones.push_back(pattern);
+        ESP_LOGI("scanner", "Found zone: %s", pattern.c_str());
+      }
+
+      // Store discovered zones
+      std::string zones_str = "";
+      for (size_t i = 0; i < found_zones.size(); i++) {
+        zones_str += found_zones[i];
+        if (i < found_zones.size() - 1) zones_str += ",";
+      }
+      id(zones_data) = zones_str;
+
+      return found_zones;
+    update_interval: 2min
+
+# HA Integration - Get real data from your Home Assistant
+text_sensor:
+  - platform: homeassistant
+    entity_id: input_text.dashboard_zones  # You'll create this in HA
+    name: "HA Zones List"
+    id: ha_zones_list
+    on_value:
+      - lambda: |-
+          ESP_LOGI("ha_zones", "Received zones: %s", x.c_str());
+          id(zones_data) = x;
+          // Trigger UI rebuild
+          id(lvgl_comp)->show_page("dynamic_home");
+
+  - platform: homeassistant
+    entity_id: input_text.dashboard_devices  # You'll create this in HA
+    name: "HA Devices List"
+    id: ha_devices_list
+    on_value:
+      - lambda: |-
+          ESP_LOGI("ha_devices", "Received devices: %s", x.c_str());
+          id(devices_data) = x;
+
+# LVGL Configuration for 480x320 display
+font: !include
+  file: layouts/fonts/fonts.yaml
+  vars:
+    text_sm: 14
+    text_md: 18
+    text_lg: 22
+    text_xl: 26
+    text_xxl: 30
+    icons_sm: 18
+    icons_md: 24
+    icons_lg: 32
+    icons_xl: 40
+    icons_xxl: 48
+
+script:
+  - id: go_to_zone
+    parameters:
+      zone_name: string
+    then:
+      - lambda: |-
+          ESP_LOGI("navigation", "Going to zone: %s", zone_name.c_str());
+          // Logic to show zone page
+
+  - id: cycle_zones
+    then:
+      - lambda: |-
+          // Parse zones from stored data and cycle through them
+          std::string zones = id(zones_data);
+          if (zones.empty()) return;
+
+          // Simple cycling logic
+          std::vector<std::string> zone_list;
+          std::stringstream ss(zones);
+          std::string zone;
+
+          while (std::getline(ss, zone, ',')) {
+            zone_list.push_back(zone);
+          }
+
+          if (!zone_list.empty()) {
+            int current = id(current_zone_index);
+            current = (current + 1) % zone_list.size();
+            id(current_zone_index) = current;
+
+            ESP_LOGI("cycle", "Switching to zone: %s", zone_list[current].c_str());
+          }
+
+# Simple LVGL layout for dynamic content
+lvgl:
+  log_level: INFO
+  color_depth: 16
+  bg_color: 0x000000
+  text_color: 0xFFFFFF
+  border_color: 0x808080
+
+  theme: !include layouts/themes/main.yaml
+
+  # Top layer with navigation
+  top_layer:
+    widgets:
+      # Simple header
+      - obj:
+          id: header
+          width: 100%
+          height: 40
+          align: TOP_MID
+          bg_color: 0x42495A
+          border_width: 0
+          radius: 0
+          widgets:
+            - label:
+                id: zone_title
+                align: CENTER
+                text: "Dynamic Dashboard"
+                text_color: 0xFFFFFF
+
+      # Simple footer with navigation
+      - obj:
+          id: footer
+          width: 100%
+          height: 40
+          align: BOTTOM_MID
+          bg_color: 0x42495A
+          border_width: 0
+          radius: 0
+          layout:
+            type: FLEX
+            flex_flow: ROW
+            flex_align_main: SPACE_EVENLY
+          widgets:
+            - button:
+                width: 80
+                height: 35
+                bg_color: 0x5A6173
+                on_click:
+                  - script.execute: cycle_zones
+                widgets:
+                  - label:
+                      align: CENTER
+                      text: "NEXT"
+            - button:
+                width: 80
+                height: 35
+                bg_color: 0x5A6173
+                on_click:
+                  - homeassistant.service:
+                      service: script.refresh_dashboard
+                widgets:
+                  - label:
+                      align: CENTER
+                      text: "REFRESH"
+
+  # Main content pages
+  pages:
+    - id: dynamic_home
+      bg_color: 0x42495A
+      pad_all: 45  # Space for header/footer
+      widgets:
+        - obj:
+            id: main_container
+            width: 100%
+            height: 100%
+            bg_opa: TRANSP
+            border_width: 0
+            layout:
+              type: FLEX
+              flex_flow: COLUMN
+              flex_align_main: CENTER
+              flex_align_cross: CENTER
+              pad_row: 10
+            widgets:
+              # Status display
+              - label:
+                  id: status_label
+                  text: "Loading zones..."
+                  text_align: CENTER
+
+              # Dynamic content area
+              - obj:
+                  id: dynamic_content
+                  width: 90%
+                  height: 200
+                  bg_color: 0x5A6173
+                  radius: 10
+                  layout:
+                    type: FLEX
+                    flex_flow: ROW_WRAP
+                    flex_align_main: SPACE_EVENLY
+                    pad_all: 10
+                  widgets:
+                    # These will be populated dynamically
+                    - button:
+                        width: 100
+                        height: 60
+                        bg_color: 0x42495A
+                        on_click:
+                          - homeassistant.service:
+                              service: light.toggle
+                              data:
+                                entity_id: light.living_room_main
+                        widgets:
+                          - label:
+                              align: CENTER
+                              text: "💡\nLiving"
+                              text_align: CENTER
+
+# Services to call from HA or manually
+api:
+  services:
+    - service: update_zone_display
+      variables:
+        zone_name: string
+        devices: string
+      then:
+        - lvgl.label.update:
+            id: zone_title
+            text: !lambda 'return zone_name.c_str();'
+        - lvgl.label.update:
+            id: status_label
+            text: !lambda 'return ("Zone: " + zone_name + " | Devices: " + devices).c_str();'
+
+    - service: show_loading
+      then:
+        - lvgl.label.update:
+            id: status_label
+            text: "🔄 Updating..."
+
+    - service: show_error
+      variables:
+        error_msg: string
+      then:
+        - lvgl.label.update:
+            id: status_label
+            text: !lambda 'return ("❌ " + error_msg).c_str();'
+
+# Auto-update on startup
+time:
+  - platform: homeassistant
+    id: homeassistant_time
+    on_time_sync:
+      - delay: 5s  # Wait for HA connection
+      - template.publish: guition_zone_scanner

@@ -1,0 +1,80 @@
+# Add this to your Home Assistant configuration.yaml
+# This creates the inputs that your Guition will read from
+
+input_text:
+  dashboard_zones:
+    name: "Dashboard Zones"
+    max: 255
+    initial: "living_room,bedroom,kitchen,bathroom"
+
+  dashboard_devices:
+    name: "Dashboard Devices"
+    max: 1024
+    initial: '{"living_room":"light.living_room_main,media_player.living_room_tv","bedroom":"light.bedroom_ceiling,light.bedroom_lamp"}'
+
+# Script to auto-populate zones from your actual entities
+script:
+  refresh_dashboard:
+    alias: "Refresh Dashboard Data"
+    sequence:
+      - service: input_text.set_value
+        target:
+          entity_id: input_text.dashboard_zones
+        data:
+          value: >-
+            {%- set zones = [] -%}
+            {%- for entity in states.light -%}
+              {%- set zone = entity.entity_id.split('.')[1].split('_')[0] -%}
+              {%- if zone not in zones and zone != 'light' -%}
+                {%- set zones = zones + [zone] -%}
+              {%- endif -%}
+            {%- endfor -%}
+            {{ zones | join(',') }}
+
+      - service: input_text.set_value
+        target:
+          entity_id: input_text.dashboard_devices
+        data:
+          value: >-
+            {%- set ns = namespace(result={}) -%}
+            {%- for entity in states.light + states.switch + states.media_player -%}
+              {%- set zone = entity.entity_id.split('.')[1].split('_')[0] -%}
+              {%- if zone != entity.domain -%}
+                {%- if zone not in ns.result -%}
+                  {%- set ns.result = dict(ns.result, **{zone: []}) -%}
+                {%- endif -%}
+                {%- set ns.result = dict(ns.result, **{zone: ns.result[zone] + [entity.entity_id]}) -%}
+              {%- endif -%}
+            {%- endfor -%}
+            {%- for zone, entities in ns.result.items() -%}
+              {%- set ns.result = dict(ns.result, **{zone: entities | join(',')}) -%}
+            {%- endfor -%}
+            {{ ns.result | tojson }}
+
+# Automation to refresh every hour
+automation:
+  - alias: "Auto Refresh Dashboard"
+    trigger:
+      - platform: time_pattern
+        hours: "*"
+    action:
+      - service: script.refresh_dashboard
+
+# Manual button for testing
+input_button:
+  refresh_dashboard_now:
+    name: "Refresh Dashboard Now"
+
+automation:
+  - alias: "Manual Dashboard Refresh"
+    trigger:
+      - platform: state
+        entity_id: input_button.refresh_dashboard_now
+    action:
+      - service: script.refresh_dashboard
+      - service: esphome.guition_35_dynamic_show_loading  # Call your ESPHome device
+      - delay: 2
+      - service: esphome.guition_35_dynamic_update_zone_display
+        data:
+          zone_name: "Updated!"
+          devices: "{{ states('input_text.dashboard_devices') | length }} chars"

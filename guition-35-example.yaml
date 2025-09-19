@@ -9,3 +9,26 @@ packages:
   common: !include common.yaml
   device: !include devices/JC3248W535.yaml
   layout: !include layouts/480x320.yaml
+
+# DYNAMIC ZONES - Add this section
+globals:
+  - id: discovered_zones
+    type: std::string
+    initial_value: '""'
+
+text_sensor:
+  - platform: homeassistant
+    entity_id: input_text.dashboard_zones
+    name: "Dashboard Zones"
+    id: dashboard_zones
+    on_value:
+      - lambda: |-
+          ESP_LOGI("zones", "Got zones: %s", x.c_str());
+          id(discovered_zones) = x;
+
+api:
+  services:
+    - service: show_zone_info
+      then:
+        - lambda: |-
+            ESP_LOGI("info", "Zones: %s", id(discovered_zones).c_str());

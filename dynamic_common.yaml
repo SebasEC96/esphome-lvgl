@@ -1,0 +1,148 @@
+# Dynamic Common Configuration
+# Include this in your device configuration to enable dynamic discovery
+
+# Include base common configuration
+packages:
+  base_common: !include common.yaml
+  dynamic_zones: !include dynamic_zones.yaml
+  ha_integration: !include layouts/widgets/dynamic_discovery/ha_integration.yaml
+  interface_builder: !include layouts/widgets/dynamic_discovery/interface_builder.yaml
+
+# Override LVGL configuration for dynamic content
+lvgl:
+  # Inherit from base but add dynamic capabilities
+  on_idle:
+    timeout: 30s
+    then:
+      - if:
+          condition:
+            binary_sensor.is_on: zones_updated
+          then:
+            - script.execute: force_interface_rebuild
+
+# Additional text sensors for debugging
+text_sensor:
+  - platform: template
+    name: "Dynamic Dashboard Status"
+    id: dashboard_status
+    lambda: |-
+      static uint32_t last_update = 0;
+      uint32_t now = millis();
+
+      if (now - last_update > 60000) {  // Update every minute
+        last_update = now;
+
+        std::string status = "Active - ";
+        status += "Zones: " + std::to_string(id(config_parser).get_zones().size());
+        status += ", Devices: " + std::to_string(id(config_parser).get_devices().size());
+        status += ", Last update: " + std::to_string(id(last_update));
+
+        return status;
+      }
+
+      return {};
+    update_interval: 1min
+
+# Enhanced API services for better control
+api:
+  services:
+    - service: reload_dynamic_config
+      then:
+        - lambda: |-
+            ESP_LOGI("api", "Reloading dynamic configuration");
+        - template.publish: zones_discovery
+        - template.publish: devices_discovery
+        - script.execute: force_interface_rebuild
+
+    - service: set_zone_visibility
+      variables:
+        zone_name: string
+        visible: bool
+      then:
+        - lambda: |-
+            ESP_LOGI("api", "Setting zone %s visibility to %s", zone_name.c_str(), visible ? "true" : "false");
+            // Implementation would modify zone visibility
+
+    - service: add_custom_widget
+      variables:
+        zone_name: string
+        widget_type: string
+        entity_id: string
+        config: string
+      then:
+        - lambda: |-
+            ESP_LOGI("api", "Adding custom widget to zone %s", zone_name.c_str());
+            // Implementation would add custom widget
+
+    - service: get_dashboard_info
+      then:
+        - lambda: |-
+            auto zones = id(config_parser).get_zones();
+            auto devices = id(config_parser).get_devices();
+
+            ESP_LOGI("info", "Dashboard Info:");
+            ESP_LOGI("info", "  Zones: %d", zones.size());
+            ESP_LOGI("info", "  Devices: %d", devices.size());
+            ESP_LOGI("info", "  Memory usage: %d bytes", ESP.getFreeHeap());
+
+# Button for manual refresh (useful for testing)
+binary_sensor:
+  - platform: gpio
+    pin:
+      number: 0  # Boot button on most ESP32 boards
+      inverted: true
+    name: "Manual Refresh Button"
+    on_press:
+      - script.execute: force_interface_rebuild
+
+# Status LED to indicate dynamic system status
+output:
+  - platform: gpio
+    pin: 2  # Built-in LED on most ESP32 boards
+    id: status_led
+
+light:
+  - platform: binary
+    output: status_led
+    name: "Dynamic System Status"
+    id: dynamic_status_light
+
+# Indicate system status with LED
+interval:
+  - interval: 5s
+    then:
+      - if:
+          condition:
+            lambda: 'return !id(zones_data).empty() && !id(devices_data).empty();'
+          then:
+            - light.turn_on: dynamic_status_light
+          else:
+            - light.turn_off: dynamic_status_light
+
+# Memory monitoring
+sensor:
+  - platform: template
+    name: "Free Heap"
+    lambda: 'return ESP.getFreeHeap();'
+    unit_of_measurement: "bytes"
+    device_class: data_size
+    update_interval: 30s
+    entity_category: diagnostic
+
+# Performance monitoring
+  - platform: template
+    name: "Widget Rebuild Time"
+    id: rebuild_time
+    unit_of_measurement: "ms"
+    entity_category: diagnostic
+
+# Enhanced logging for debugging
+logger:
+  level: INFO
+  logs:
+    dynamic: DEBUG
+    zones: DEBUG
+    devices: DEBUG
+    builder: DEBUG
+    parser: DEBUG
+    categorizer: DEBUG

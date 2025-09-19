@@ -1,0 +1,240 @@
+# Home Assistant Integration for Dynamic Discovery
+# This connects to HA API to get real entity data
+
+# Text sensor que obtiene la configuración completa desde HA
+text_sensor:
+  - platform: homeassistant
+    entity_id: sensor.dashboard_zones_config
+    name: "Dashboard Zones Config"
+    id: ha_zones_config
+    on_value:
+      - lambda: |-
+          ESP_LOGI("ha_config", "Received zones config: %s", x.c_str());
+          id(zones_data) = x;
+          id(config_parser).parse_zones_config(x);
+
+  - platform: homeassistant
+    entity_id: sensor.dashboard_devices_config
+    name: "Dashboard Devices Config"
+    id: ha_devices_config
+    on_value:
+      - lambda: |-
+          ESP_LOGI("ha_config", "Received devices config: %s", x.c_str());
+          id(devices_data) = x;
+          id(config_parser).parse_devices_config(x);
+
+# Sensor para obtener lista de todas las entidades disponibles
+  - platform: homeassistant
+    entity_id: sensor.all_entities_list
+    name: "All Entities List"
+    id: all_entities
+    on_value:
+      - lambda: |-
+          // Parsear lista de entidades y categorizarlas automáticamente
+          id(entity_categorizer).categorize_entities(x);
+
+# Custom component para parsear configuración JSON
+custom_component:
+  - lambda: |-
+      class ConfigParser : public Component {
+      public:
+        void parse_zones_config(const std::string& config) {
+          // Parsear JSON de zonas
+          DynamicJsonDocument doc(2048);
+          auto error = deserializeJson(doc, config);
+
+          if (error) {
+            ESP_LOGE("parser", "JSON parse error: %s", error.c_str());
+            return;
+          }
+
+          // Limpiar zonas existentes
+          this->zones_.clear();
+
+          // Extraer zonas del JSON
+          for (JsonPair zone : doc.as<JsonObject>()) {
+            Zone new_zone;
+            new_zone.name = zone.key().c_str();
+            new_zone.friendly_name = zone.value()["friendly_name"] | zone.key().c_str();
+            new_zone.icon = zone.value()["icon"] | "mdi:home";
+            new_zone.enabled = zone.value()["enabled"] | true;
+
+            this->zones_.push_back(new_zone);
+            ESP_LOGI("parser", "Added zone: %s", new_zone.name.c_str());
+          }
+
+          // Trigger interface rebuild
+          id(interface_builder).rebuild_zones();
+        }
+
+        void parse_devices_config(const std::string& config) {
+          DynamicJsonDocument doc(4096);
+          auto error = deserializeJson(doc, config);
+
+          if (error) {
+            ESP_LOGE("parser", "JSON parse error: %s", error.c_str());
+            return;
+          }
+
+          this->devices_.clear();
+
+          for (JsonPair zone : doc.as<JsonObject>()) {
+            std::string zone_name = zone.key().c_str();
+
+            for (JsonPair device_type : zone.value().as<JsonObject>()) {
+              std::string type = device_type.key().c_str();
+
+              for (JsonVariant device : device_type.value().as<JsonArray>()) {
+                Device new_device;
+                new_device.entity_id = device["entity_id"];
+                new_device.friendly_name = device["friendly_name"];
+                new_device.type = type;
+                new_device.zone = zone_name;
+                new_device.icon = device["icon"];
+
+                this->devices_.push_back(new_device);
+              }
+            }
+          }
+
+          id(interface_builder).rebuild_devices();
+        }
+
+        std::vector<Zone> get_zones() { return this->zones_; }
+        std::vector<Device> get_devices() { return this->devices_; }
+
+      private:
+        struct Zone {
+          std::string name;
+          std::string friendly_name;
+          std::string icon;
+          bool enabled;
+        };
+
+        struct Device {
+          std::string entity_id;
+          std::string friendly_name;
+          std::string type;
+          std::string zone;
+          std::string icon;
+        };
+
+        std::vector<Zone> zones_;
+        std::vector<Device> devices_;
+      };
+
+      return new ConfigParser();
+    id: config_parser
+
+# Custom component para categorizar entidades automáticamente
+  - lambda: |-
+      class EntityCategorizer : public Component {
+      public:
+        void categorize_entities(const std::string& entities_list) {
+          // Parsear lista de entidades separadas por coma
+          std::vector<std::string> entities;
+          std::stringstream ss(entities_list);
+          std::string entity;
+
+          while (std::getline(ss, entity, ',')) {
+            entity.erase(0, entity.find_first_not_of(" \t"));
+            entity.erase(entity.find_last_not_of(" \t") + 1);
+            entities.push_back(entity);
+          }
+
+          // Categorizar por dominio y zona
+          std::map<std::string, std::vector<std::string>> zones_map;
+
+          for (const auto& entity : entities) {
+            std::string domain = entity.substr(0, entity.find('.'));
+            std::string name = entity.substr(entity.find('.') + 1);
+
+            // Extraer zona del nombre de la entidad
+            std::string zone = extract_zone(name);
+
+            if (!zone.empty()) {
+              zones_map[zone].push_back(entity);
+            }
+          }
+
+          // Generar configuración automática
+          generate_auto_config(zones_map);
+        }
+
+      private:
+        std::string extract_zone(const std::string& entity_name) {
+          // Patrones comunes de nombres de zona
+          std::vector<std::string> zone_patterns = {
+            "living_room", "bedroom", "kitchen", "bathroom",
+            "office", "garage", "basement", "attic", "hallway",
+            "dining_room", "laundry", "study", "guest"
+          };
+
+          for (const auto& pattern : zone_patterns) {
+            if (entity_name.find(pattern) != std::string::npos) {
+              return pattern;
+            }
+          }
+
+          return "";
+        }
+
+        void generate_auto_config(const std::map<std::string, std::vector<std::string>>& zones_map) {
+          // Generar configuración JSON automática
+          DynamicJsonDocument config(4096);
+
+          for (const auto& zone_pair : zones_map) {
+            JsonObject zone = config.createNestedObject(zone_pair.first);
+            zone["friendly_name"] = format_zone_name(zone_pair.first);
+            zone["enabled"] = true;
+            zone["auto_discovered"] = true;
+
+            // Categorizar dispositivos por tipo
+            JsonObject devices = zone.createNestedObject("devices");
+
+            for (const auto& entity : zone_pair.second) {
+              std::string domain = entity.substr(0, entity.find('.'));
+
+              if (!devices.containsKey(domain)) {
+                devices.createNestedArray(domain);
+              }
+
+              JsonObject device = devices[domain].createNestedObject();
+              device["entity_id"] = entity;
+              device["auto_discovered"] = true;
+            }
+          }
+
+          std::string config_str;
+          serializeJson(config, config_str);
+
+          ESP_LOGI("categorizer", "Auto-generated config: %s", config_str.c_str());
+
+          // Enviar configuración de vuelta a HA
+          auto call = id(homeassistant_api).call_service("input_text", "set_value");
+          call.add_variable("entity_id", "input_text.dashboard_auto_config");
+          call.add_variable("value", config_str);
+          call.perform();
+        }
+
+        std::string format_zone_name(const std::string& zone) {
+          std::string formatted = zone;
+          std::replace(formatted.begin(), formatted.end(), '_', ' ');
+
+          // Capitalizar primera letra de cada palabra
+          bool capitalize = true;
+          for (char& c : formatted) {
+            if (capitalize && std::isalpha(c)) {
+              c = std::toupper(c);
+              capitalize = false;
+            } else if (c == ' ') {
+              capitalize = true;
+            }
+          }
+
+          return formatted;
+        }
+      };
+
+      return new EntityCategorizer();
+    id: entity_categorizer

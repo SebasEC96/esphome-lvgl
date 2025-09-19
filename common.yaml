@@ -56,9 +56,10 @@ text_sensor:
       name: Mac Address
       entity_category: diagnostic
 
-homeassistant:
-  - entity_id: light.light_2_1
-    id: light_2_1
+binary_sensor:
+  - platform: homeassistant
+    id: light_2_1_state
+    entity_id: light.light_2_1
 
 globals:
   - id: homeassistant_ip

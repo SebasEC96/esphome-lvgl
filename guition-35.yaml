@@ -3,7 +3,7 @@ esphome:
   friendly_name: Guition Screen ESP
 
 substitutions:
-  home_page: lighting_1
+  home_page: home
 
 packages:
   common: !include common.yaml

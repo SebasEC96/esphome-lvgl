@@ -122,7 +122,7 @@ lvgl:
                     file: widgets/buttons/icon_text_buttons/light_buttons/widget.yaml
                     vars:
                       uid: sala_light
-                      entity_id: light.sala_light
+                      entity_id: light.luces_sala
                       text: Luz Sala
                       <<: *button_widget_vars
 
@@ -185,7 +185,7 @@ packages:
   # sala
   sala_light_widget_sensors: !include { file: widgets/buttons/icon_text_buttons/light_buttons/sensors.yaml, vars: {
     uid: sala_light,
-    entity_id: light.sala_light
+    entity_id: light.luces_sala
   }}
 
   sala_tv_widget_sensors: !include { file: widgets/buttons/icon_buttons/stateful_sensors.yaml, vars: {

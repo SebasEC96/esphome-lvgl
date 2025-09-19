@@ -59,3 +59,14 @@ text_sensor:
 globals:
   - id: homeassistant_ip
     type: std::string
+
+light:
+  - platform: group
+    name: "Luces Sala"
+    id: luces_sala
+    entities:
+      - light.light_2_1
+      - light.light_2_2
+      - light.light_3_1
+      - light.light_3_2
+      - light.wall_light

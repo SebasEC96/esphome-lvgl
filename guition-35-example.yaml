@@ -28,6 +28,9 @@ text_sensor:
 
 api:
   services:
+    - service: test_dynamic
+      then:
+        - logger.log: "TEST: Dynamic service working!"
     - service: show_zone_info
       then:
         - lambda: |-

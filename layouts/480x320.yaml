@@ -127,16 +127,17 @@ lvgl:
             widgets:
               - button: # luz sala
                   <<: !include
-                    file: widgets/buttons/text_buttons/stateless.yaml
+                    file: widgets/buttons/icon_text_buttons/stateful.yaml
                     vars:
                       uid: sala_lights_toggle
+                      icon_on: "\U000F0335"
+                      icon_off: "\U000F0336"
                       text: Luz Sala
                       <<: *button_widget_vars
-                  on_press:
-                    then:
-                      - homeassistant.action:
-                          action: light.toggle
-                          data: { entity_id: light.light_2_1 }
+                  on_short_click:
+                    - homeassistant.action:
+                        action: light.toggle
+                        data: { entity_id: light.light_2_1 }
               - button: # tv sala
                   <<: !include
                     file: widgets/buttons/icon_text_buttons/stateful.yaml
@@ -197,6 +198,12 @@ packages:
     !include {
       file: widgets/buttons/icon_buttons/stateful_sensors.yaml,
       vars: { uid: sala_tv, entity_id: media_player.sala_tv },
+    }
+
+  sala_lights_widget_sensors:
+    !include {
+      file: widgets/buttons/icon_text_buttons/stateful_sensors.yaml,
+      vars: { uid: sala_lights_toggle, entity_id: light.light_2_1 },
     }
 
   # habitacion

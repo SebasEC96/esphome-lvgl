@@ -27,9 +27,6 @@ switch:
 binary_sensor:
   - platform: status
     name: Status
-  - platform: homeassistant
-    id: light_2_1_state
-    entity_id: light.light_2_1
 
 sensor:
   - id: wifi_signal_db

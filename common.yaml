@@ -60,27 +60,3 @@ globals:
   - id: homeassistant_ip
     type: std::string
 
-light:
-  - platform: template
-    name: "Luces Sala"
-    id: luces_sala
-    turn_on_action:
-      - homeassistant.action:
-          action: light.turn_on
-          data:
-            entity_id:
-              - light.light_2_1
-              - light.light_2_2
-              - light.light_3_1
-              - light.light_3_2
-              - light.wall_light
-    turn_off_action:
-      - homeassistant.action:
-          action: light.turn_off
-          data:
-            entity_id:
-              - light.light_2_1
-              - light.light_2_2
-              - light.light_3_1
-              - light.light_3_2
-              - light.wall_light

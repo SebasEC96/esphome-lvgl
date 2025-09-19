@@ -119,12 +119,21 @@ lvgl:
             widgets:
               - button: # luz sala
                   <<: !include
-                    file: widgets/buttons/icon_text_buttons/light_buttons/widget.yaml
+                    file: widgets/buttons/text_buttons/stateless.yaml
                     vars:
-                      uid: sala_light
-                      entity_id: light.luces_sala
+                      uid: sala_lights_toggle
                       text: Luz Sala
                       <<: *button_widget_vars
+                  on_short_click:
+                    - homeassistant.action:
+                        action: light.toggle
+                        data:
+                          entity_id:
+                            - light.light_2_1
+                            - light.light_2_2
+                            - light.light_3_1
+                            - light.light_3_2
+                            - light.wall_light
 
               - button: # tv sala
                   <<: !include
@@ -182,11 +191,6 @@ packages:
   # boot screen
   boot_screen_sensors: !include { file: widgets/boot_screen/sensors.yaml }
 
-  # sala
-  sala_light_widget_sensors: !include { file: widgets/buttons/icon_text_buttons/light_buttons/sensors.yaml, vars: {
-    uid: sala_light,
-    entity_id: light.luces_sala
-  }}
 
   sala_tv_widget_sensors: !include { file: widgets/buttons/icon_buttons/stateful_sensors.yaml, vars: {
     uid: sala_tv,
